@@ -1,0 +1,266 @@
+<!DOCTYPE html><html><head><meta charset="utf-8"><title>document</title><style>
+  {
+    font-family: 'Calibri', 'Arial', 'Microsoft YaHei', 'Hei', 'Segoe UI Emoji', 'Apple Color Emoji', 'Noto Color Emoji', 'sans-serif';
+  }
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-family: 'Calibri', 'Arial', 'Microsoft YaHei', 'Hei', 'Segoe UI Emoji', 'Apple Color Emoji', 'Noto Color Emoji', 'sans-serif';
+  }
+  h1 {
+    font-size: 2em;
+    margin-top: 0.67em;
+    margin-bottom: 0.67em;
+    font-weight: bold;
+  }
+  h2 {
+    font-size: 1.5em;
+    margin-top: 0.83em;
+    margin-bottom: 0.83em;
+    font-weight: bold;
+  }
+  h3 {
+    font-size: 1.17em;
+    margin-top: 1em;
+    margin-bottom: 1em;
+    font-weight: bold;
+  }
+  h4 {
+    font-size: 1em;
+    margin-top: 1.33em;
+    margin-bottom: 1.33em;
+    font-weight: bold;
+  }
+  h5 {
+    font-size: 0.83em;
+    margin-top: 1.67em;
+    margin-bottom: 1.67em;
+    font-weight: bold;
+  }
+  h6 {
+    font-size: 0.67em;
+    margin-top: 2.33em;
+    margin-bottom: 2.33em;
+    font-weight: bold;
+  }
+  p {
+    margin-top: 1em;
+    margin-bottom: 1em;
+  }
+  strong, b {
+    font-weight: bold;
+  }
+  em, i {
+    font-style: italic;
+  }
+  a {
+    color: hsl(24.6 60% 52%);
+    text-decoration: underline;
+  }
+  ul {
+    display: block;
+    list-style-type: disc;
+    margin-top: 1em;
+    margin-bottom: 1em;
+    padding-left: 40px;
+  }
+  ol {
+    display: block;
+    list-style-type: decimal;
+    margin-top: 1em;
+    margin-bottom: 1em;
+    padding-left: 40px;
+  }
+  li {
+    display: list-item;
+    margin-bottom: 0.5em;
+  }
+  blockquote {
+    display: block;
+    margin-top: 1em;
+    margin-bottom: 1em;
+    margin-left: 40px;
+    margin-right: 40px;
+    border-left: 4px solid hsl(24.6 30% 50%);
+    padding-left: 1em;
+    color: hsl(24.6 5% 65%);
+  }
+  code {
+    font-family: monospace;
+    background-color: hsl(-13.4 30% 25%);
+    color: hsl(24.6 5% 95%);
+    padding: 0.2em 0.4em;
+    border-radius: 3px;
+  }
+  pre {
+    font-family: monospace;
+    background-color: hsl(-13.4 30% 25%);
+    color: hsl(24.6 5% 95%);
+    padding: 1em;
+    margin: 0.5em 0;
+    overflow: auto;
+    border-radius: 3px;
+  }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 1em 0;
+    page-break-inside: avoid;
+    page-break-before: auto;
+    page-break-after: auto;
+  }
+  th, td {
+    border: 1px solid hsl(24.6 30% 50%);
+    padding: 8px;
+    text-align: left;
+    page-break-inside: avoid;
+    page-break-after: auto;
+    page-break-before: auto;
+    vertical-align: top;
+    word-break: break-word;
+  }
+  th {
+    background-color: hsl(24.6 60% 52%);
+    color: hsl(0 0% 100%);
+    font-weight: bold;
+  }
+  img {
+    max-width: 100%;
+    height: auto;
+  }
+  hr {
+    border: 0;
+    border-top: 1px solid hsl(24.6 30% 50%);
+    margin: 1em 0;
+  }
+  del, s {
+    text-decoration: line-through;
+  }
+
+</style></head><body class="markdown-preview"><h3>Convert Parent Data to Table (QC Team → IT Team)</h3>
+<ul>
+<li>Make sure the <code>Parent Data</code> is final and validator shows acceptable error. </li>
+<li>Name of the table should be <code>Table 1</code></li>
+</ul>
+<pre><code>CTRL + T
+</code></pre>
+<hr>
+<h3>Add index with VBA</h3>
+<ul>
+<li>Ctrl + f8 </li>
+<li>Developer &gt; Macro &gt; Create</li>
+</ul>
+<pre><code class="language-vb">Sub InsertIndexFirstColumn()
+
+    Dim tbl As ListObject
+    Dim i As Long
+    Dim n As Long
+    Dim arr() As Variant
+    
+    ' Reference the table (change names as needed)
+    Set tbl = ActiveSheet.ListObjects("Table1")
+    
+    ' Insert new column as the first column
+    tbl.ListColumns.Add Position:=1
+    tbl.HeaderRowRange(1, 1).Value = "index"
+    
+    ' Number of data rows
+    n = tbl.DataBodyRange.Rows.Count
+    
+    ' Create array starting from 0
+    ReDim arr(1 To n, 1 To 1)
+    
+    For i = 1 To n
+        arr(i, 1) = i - 1
+    Next i
+    
+    ' Write to the new column in one operation (fast)
+    tbl.ListColumns(1).DataBodyRange.Value = arr
+
+End Sub
+</code></pre>
+<h3>save <code>Parent Data</code> and close</h3>
+<hr>
+<h3>Get Checksum</h3>
+<p>place <code>checksum.py</code> in the parent data folder</p>
+<pre><code>python checksum.py
+</code></pre>
+<h3>copy Hash value of <code>Parent Data</code></h3>
+<h4>example: f1c7a82f5a0ecc384d3965972233be5b</h4>
+<hr>
+<h2>Power Query (M Code)</h2>
+<p>Paste Hash value to the below code</p>
+<pre><code class="language-powerquery">
+let
+    Source = Excel.CurrentWorkbook(){[Name="Table1"]}[Content],
+    FilteredRows = Table.SelectRows(Source, each [interview_status] <> 105 and [c2_age] > 12),
+    SelectedColumns = Table.SelectColumns(FilteredRows, {"index","cluster_number","bi1a","bi1b","bi1c","bi1c_1","hh_latitude","hh_longitude","hh_address","start_datetime","end_datetime","created_by","household_number","member_number","c2_name","c2_age","c2_gender","interview_status"}),
+
+    // Remove non-ASCII only from bi1a, bi1b, bi1c, bi1c_1
+    #"Removed NonASCII" = Table.TransformColumns(
+        SelectedColumns,
+        {
+            {"bi1a",   each if _ = null then null else Text.Select(_, List.Transform({32..127}, each Character.FromNumber(_))), type text},
+            {"bi1b",   each if _ = null then null else Text.Select(_, List.Transform({32..127}, each Character.FromNumber(_))), type text},
+            {"bi1c",   each if _ = null then null else Text.Select(_, List.Transform({32..127}, each Character.FromNumber(_))), type text},
+            {"bi1c_1", each if _ = null then null else Text.Select(_, List.Transform({32..127}, each Character.FromNumber(_))), type text}
+        }
+    ),
+
+    // Convert Excel serial numbers to formatted text
+    #"Formatted Dates" = Table.TransformColumns(
+        #"Removed NonASCII",
+        {
+            {"start_datetime", each DateTime.ToText(DateTime.From(_), "dd-MM-yyyy HH:mm:ss"), type text},
+            {"end_datetime",   each DateTime.ToText(DateTime.From(_), "dd-MM-yyyy HH:mm:ss"), type text}
+        }
+    ),
+    
+    #"Added Parent MD5" = Table.AddColumn(#"Formatted Dates", "Parent MD5", each "<ADD HASH CODE>")
+in
+    #"Added Parent MD5"
+</code></pre>
+<hr>
+<h2>Group by bi1a → Operation: All rows → Create Separate Queries → Close &amp; Load to</h2>
+<p><em>(Connection only — do not load all at once)</em></p>
+<hr>
+<h2>Move All Sheets Except Active (VBA)</h2>
+<pre><code class="language-vb">Sub MoveAllExceptActive()
+
+    Dim ws As Worksheet
+    Dim keepSheet As Worksheet
+    
+    Application.ScreenUpdating = False
+    
+    ' Store the active sheet
+    Set keepSheet = ActiveSheet
+    
+    ' Loop through all sheets
+    For Each ws In ThisWorkbook.Worksheets
+        
+        ' Move every sheet except the active one
+        If ws.Name &lt;&gt; keepSheet.Name Then
+            ws.Move   ' moves to a new workbook
+        End If
+        
+    Next ws
+    
+    Application.ScreenUpdating = True
+
+End Sub
+</code></pre>
+<hr>
+<h2>Data Checks - State Co-ordinators</h2>
+<ul>
+<li>Remove unwanted districts (keep only MP clusters)</li>
+<li>Check for all CPC equal to 0</li>
+<li>Check on small clusters — Remove or Reassign (<strong>Level1</strong>)</li>
+<li>Check on <code>nsplit</code> &gt; 2 — Remove or Reconsider or Break (<strong>Level 2</strong>)</li>
+<li>Check on <code>nsplit</code> = 1 — Verify using geocodes and confirm the location matches the actual site using maps (<strong>Level 3</strong>)</li>
+</ul>
+<p><strong>Clarified note (Level 3):</strong>
+These clusters are acceptable but require location validation against the actual site.</p>
+</body></html>

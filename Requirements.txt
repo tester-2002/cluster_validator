@@ -1,0 +1,10 @@
+streamlit 
+pandas 
+folium 
+streamlit-folium 
+scikit-learn 
+openpyxl
+matplotlib
+reportlab
+msgspec
+plotly-calheatmap
