@@ -154,6 +154,7 @@ def undo_to_sno(sno):
     st.session_state._saved_districts_to_remove = []
     st.session_state.mp_bi1c_values = []
     st.session_state.mp_clusters_selected = []
+    st.session_state._injected_clusters = []
     # Reset widget keys so multiselects/forms pick up the cleared state
     for _wk in ('districts_to_remove', 'mp_bi1c_multiselect'):
         if _wk in st.session_state:
@@ -201,6 +202,18 @@ def undo_to_sno(sno):
             # Restore remarks
             for idx_str, remark in op_data.get('remarks', {}).items():
                 st.session_state.remarks_dict[int(idx_str)] = remark
+        elif op_type == 'add_cluster':
+            # Rebuild injected cluster from step data
+            _cn = op_data.get('cn', 'XX9999')
+            _purpose = op_data.get('purpose', '')
+            _dummy = {}
+            _dummy['CN'] = _cn
+            _dummy['interview_status'] = 20202020
+            _dummy['HH_ID'] = _cn + '.000'
+            _dummy['MEM_ID'] = _cn + '.000.0'
+            if _purpose:
+                _dummy['c2_name'] = _purpose
+            st.session_state._injected_clusters.append(pd.DataFrame([_dummy]))
     
     st.session_state.steps_tracker = remaining
     # Reset DBSCAN labels to force recalculation
@@ -744,6 +757,9 @@ def generate_name_correction_form(df, df_processed=None, min_neighbors_val='10')
         'Missing\nGeocodes\n(lat/lon)',
         f'n_splits\n(DBSCAN {eps_val}km)',
         f'Noise\n({eps_val}km | min_NEIGHBOUR:{min_neighbors_val})',
+        f'Noise_103\n({eps_val}km)',
+        'HH\nContacted',
+        'HH\nResponded',
     ]
     # Section 3: Your Correction (cols 17-23)
     correction_headers = [
@@ -874,7 +890,7 @@ def generate_name_correction_form(df, df_processed=None, min_neighbors_val='10')
     # ── Column widths ───────────────────────────────────────────────────────
     col_widths = (
         [12, 12, 15, 20, 20, 12, 10]      # Server Data (7 cols)
-        + [12, 13, 14, 12, 12, 14, 14, 12, 10, 10]    # Basic Info (10 cols: is_Regular, Overall Count, Completed Interviews, Response Rate, Adult Count, Adolescent Count, Gender Ratio, Missing Geocodes, n_splits, Noise)
+        + [12, 13, 14, 12, 12, 14, 14, 12, 10, 10, 10, 10, 10]    # Basic Info (13 cols: is_Regular, Overall Count, Completed Interviews, Response Rate, Adult Count, Adolescent Count, Gender Ratio, Missing Geocodes, n_splits, Noise, Noise_103, HH Contacted, HH Responded)
         + [14, 12, 18, 22, 20, 16, 18]    # Your Correction (7 cols)
         + [14, 12, 12, 15, 14, 18, 20, 14, 22, 11] # Issues (10 cols)
         + [18, 18, 16, 16, 18]             # Weightage Details (5 cols)
@@ -902,6 +918,9 @@ def generate_name_correction_form(df, df_processed=None, min_neighbors_val='10')
             'missing_geocodes': 0,
             'n_splits': '',
             'noise': '',
+            'noise_103': '',
+            'hh_contacted': 0,
+            'hh_responded': 0,
         }
         if cn_data.empty:
             return stats
@@ -956,6 +975,13 @@ def generate_name_correction_form(df, df_processed=None, min_neighbors_val='10')
                 valid_clusters = cn_src[cn_src['dbscan_cluster'] >= 0]['dbscan_cluster']
                 stats['n_splits'] = int(valid_clusters.nunique()) if len(valid_clusters) > 0 else 0
                 stats['noise']    = int((cn_src['dbscan_cluster'] == -1).sum())
+                stats['noise_103'] = int(((cn_src['dbscan_cluster'] == -1) & (cn_src['interview_status'] == 103)).sum())
+
+        # HH Contacted / HH Responded
+        if 'HH_ID' in cn_data.columns:
+            stats['hh_contacted'] = int(cn_data['HH_ID'].nunique())
+            if 'HH_Consent' in cn_data.columns:
+                stats['hh_responded'] = int(cn_data[cn_data['HH_Consent'] == 1]['HH_ID'].nunique())
 
         return stats
 
@@ -1052,6 +1078,9 @@ def generate_name_correction_form(df, df_processed=None, min_neighbors_val='10')
             stats['missing_geocodes'],
             stats['n_splits'],
             stats['noise'],
+            stats['noise_103'],
+            stats['hh_contacted'],
+            stats['hh_responded'],
         ]
         for offset, val in enumerate(basic_values):
             col_idx = basic_start + offset
@@ -1230,6 +1259,11 @@ def load_and_transform(file_bytes: bytes, filename: str) -> pd.DataFrame:
     df['HH_ID'] = df['CN'] + '.' + df['HH_NUM'].astype(str).str.zfill(3)
     df['MEM_ID'] = df['HH_ID'] + '.' + df['member_number'].astype(str).str.split('.').str[-1]
     df.drop(columns=['code_4digit', 'HH_CODE', 'HH_NUM'], inplace=True)
+    # ── Compute HH_Consent ────────────────────────────────────────────────
+    # interview_status 102 or 103 → household gave consent
+    _ist = df['interview_status'].astype(str).str.strip().str.replace('104', '101', regex=False)
+    _hh_consent_ids = df.loc[_ist.isin(['102', '103']), 'HH_ID'].drop_duplicates()
+    df['HH_Consent'] = df['HH_ID'].isin(_hh_consent_ids).astype(int)
     # ── Normalize datetime columns to DD-MM-YYYY HH:MM:SS format ─────────
     for dt_col in ['start_datetime', 'end_datetime']:
         if dt_col in df.columns:
@@ -2491,6 +2525,13 @@ if uploaded_file is not None:
         for bop in st.session_state.break_operations:
             if bop['source_cn'] in base_cluster_nums and bop['new_cn'] not in base_cluster_nums:
                 base_cluster_nums.append(bop['new_cn'])
+        
+        # Add injected (manually created) cluster CNs
+        for _inj_df in st.session_state.get('_injected_clusters', []):
+            for _inj_cn in _inj_df['CN'].dropna().astype(str).unique():
+                if _inj_cn not in base_cluster_nums:
+                    base_cluster_nums.append(_inj_cn)
+        
         base_cluster_nums = sorted(base_cluster_nums)
         
         # Filter out removed clusters and source clusters from merges
@@ -2863,6 +2904,18 @@ if uploaded_file is not None:
         
         # Build processed dataframe based on district removal
         df_processed = df.copy()
+        
+        # ── Inject new cluster rows if any ───────────────────────────────────
+        if '_inject_new_cluster' in st.session_state:
+            _inj = st.session_state.pop('_inject_new_cluster')
+            # Persist injected clusters across reruns
+            if '_injected_clusters' not in st.session_state:
+                st.session_state._injected_clusters = []
+            st.session_state._injected_clusters.append(_inj)
+        if st.session_state.get('_injected_clusters'):
+            for _inj_df in st.session_state._injected_clusters:
+                _inj_aligned = _inj_df.reindex(columns=df_processed.columns)
+                df_processed = pd.concat([df_processed, _inj_aligned], ignore_index=True)
         
         # Copy DBSCAN cluster assignments from filtered_df to df_processed if available
         if 'dbscan_cluster' in filtered_df.columns:
@@ -3248,6 +3301,27 @@ if uploaded_file is not None:
         cluster_summary_current = cluster_summary_current.merge(noise_check_current, on='CN', how='left')
         cluster_summary_current['Noise'] = cluster_summary_current['Noise'].fillna(0).astype(int)
         
+        # ── Add Noise_103 column (noise points with interview_status == 103) ──
+        if 'dbscan_cluster' in df_processed.columns:
+            def count_noise_103(group):
+                return ((group['dbscan_cluster'] == -1) & (group['interview_status'] == 103)).sum()
+            noise_103_current = df_processed.groupby('CN').apply(count_noise_103).reset_index(name='Noise_103')
+        else:
+            noise_103_current = pd.DataFrame({'CN': df_processed['CN'].unique(), 'Noise_103': 0})
+        cluster_summary_current = cluster_summary_current.merge(noise_103_current, on='CN', how='left')
+        cluster_summary_current['Noise_103'] = cluster_summary_current['Noise_103'].fillna(0).astype(int)
+        
+        # ── Add HH Contacted & HH Responded columns ──
+        _hh_contacted = df_processed.groupby('CN')['HH_ID'].nunique().reset_index(name='HH Contacted')
+        cluster_summary_current = cluster_summary_current.merge(_hh_contacted, on='CN', how='left')
+        cluster_summary_current['HH Contacted'] = cluster_summary_current['HH Contacted'].fillna(0).astype(int)
+        if 'HH_Consent' in df_processed.columns:
+            _hh_responded = df_processed[df_processed['HH_Consent'] == 1].groupby('CN')['HH_ID'].nunique().reset_index(name='HH Responded')
+        else:
+            _hh_responded = pd.DataFrame({'CN': df_processed['CN'].unique(), 'HH Responded': 0})
+        cluster_summary_current = cluster_summary_current.merge(_hh_responded, on='CN', how='left')
+        cluster_summary_current['HH Responded'] = cluster_summary_current['HH Responded'].fillna(0).astype(int)
+        
         # ── Add TYPE, District, bi1c, bi1c_1 columns (vectorized) ─────────
         # Single groupby().first() replaces 4× per-CN DataFrame scans
         _cn_meta = df_processed.groupby('CN')[['bi1b', 'bi1c', 'bi1c_1']].first().reset_index()
@@ -3379,7 +3453,7 @@ if uploaded_file is not None:
         
         # Build crosstab from df_processed
         crosstab_data_current = []
-        for district in sorted(df_processed['bi1b'].unique()):
+        for district in sorted(df_processed['bi1b'].dropna().astype(str).unique()):
             dist_df = df_processed[df_processed['bi1b'] == district]
             is_urban_dist = dist_df['bi1c'].astype(str).str.contains("Urban", case=False, na=False)
             is_tribal_dist = dist_df['bi1c'].astype(str).str.contains("TRI-", case=False, na=False)
@@ -3703,7 +3777,7 @@ if uploaded_file is not None:
             cn_filtered_df.insert(1, 'DBSCAN Cluster', cn_filtered_df['CN'].astype(str))
         
         # Reorder columns as specified
-        col_order = ['select_id', 'DBSCAN Cluster', 'CN', 'original_CN', 'original_concat', 'HH_ID', 'MEM_ID', 'bi1b', 'bi1c', 'bi1c_1', 'hh_latitude', 'hh_longitude', 'hh_address', 'start_datetime', 'end_datetime', 'created_by', 'c2_name','c2_age', 'c2_gender', 'cluster_number', 'household_number', 'member_number', 'interview_status', 'concat', 'index']
+        col_order = ['select_id', 'DBSCAN Cluster', 'CN', 'original_CN', 'original_concat', 'HH_ID', 'MEM_ID', 'bi1b', 'bi1c', 'bi1c_1', 'hh_latitude', 'hh_longitude', 'hh_address', 'start_datetime', 'end_datetime', 'created_by', 'c2_name','c2_age', 'c2_gender', 'cluster_number', 'household_number', 'member_number', 'interview_status', 'HH_Consent', 'concat', 'index']
         available_cols = [col for col in col_order if col in cn_filtered_df.columns]
         cn_filtered_df_reordered = cn_filtered_df[available_cols]
         cn_filtered_df_display = filter_dataframe(cn_filtered_df_reordered, key="main_df_filter")
@@ -3725,6 +3799,34 @@ if uploaded_file is not None:
             st.caption(f"Found {len(duplicates_display)} duplicate record(s) for {len(duplicates_df['c2_name'].unique())} unique names in this cluster")
         else:
             st.info("✅ No duplicates found in name for this cluster")
+        
+        # Download all-cluster duplicates (Excel with two sheets)
+        # Cross-cluster: c2_name appearing in 2+ different CNs
+        _cn_name_counts = df_processed.groupby('c2_name')['CN'].nunique()
+        _cross_cluster_names = _cn_name_counts[_cn_name_counts > 1].index
+        _cross_cluster_mask = df_processed['c2_name'].isin(_cross_cluster_names)
+
+        # Within-cluster duplicates: c2_name appears more than once within the same CN
+        _within_dup_mask = df_processed.duplicated(subset=['CN', 'c2_name'], keep=False)
+
+        if _cross_cluster_mask.any() or _within_dup_mask.any():
+            _all_dups = df_processed[_cross_cluster_mask].sort_values(['CN', 'c2_name'])
+            _within_dups = df_processed[_within_dup_mask].sort_values(['CN', 'c2_name'])
+
+            _dup_excel_buf = BytesIO()
+            with pd.ExcelWriter(_dup_excel_buf, engine='openpyxl') as _dup_writer:
+                _all_dups.to_excel(_dup_writer, sheet_name='Cross-Cluster Duplicates', index=False)
+                _within_dups.to_excel(_dup_writer, sheet_name='Within-Cluster Duplicates', index=False)
+            _dup_excel_buf.seek(0)
+
+            st.download_button(
+                f"⬇ Download Duplicate Names Report ({_cross_cluster_mask.sum()} cross-cluster | {_within_dup_mask.sum()} within-cluster records)",
+                _dup_excel_buf.getvalue(),
+                "duplicate_names_report.xlsx",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True,
+                key='download_all_duplicates_btn'
+            )
 
         # ── Complete Dataset Display ──────────────────────────────────────────
         st.subheader("Complete Dataset (All Records)")
@@ -3984,6 +4086,54 @@ if uploaded_file is not None:
                         undo_to_sno(sno_val)
                         st.success(f"✅ Undone {steps_to_undo} step(s) from S.No {sno_val} onward")
                         st.rerun()
+            
+            # ── Add a New Cluster ─────────────────────────────────────────
+            st.markdown("---")
+            with st.form("add_new_cluster_form", border=True):
+                st.markdown("**➕ Add a New Cluster**")
+                new_cluster_purpose = st.text_input(
+                    "Purpose of the New Cluster (optional)",
+                    placeholder="e.g. Container for moved households",
+                    key='new_cluster_purpose_input'
+                )
+                add_cluster_submitted = st.form_submit_button("Add New Cluster", use_container_width=True)
+            
+            if add_cluster_submitted:
+                # Generate next CN: find max existing CN, increment
+                existing_cns = sorted(df_processed['CN'].dropna().astype(str).unique())
+                if existing_cns:
+                    # Use prefix from first CN + next sequential 4-digit code
+                    _prefix = existing_cns[0][:2]
+                    _max_num = max(int(c[2:]) for c in existing_cns if c[2:].isdigit())
+                    _new_cn = _prefix + f"{_max_num + 1:04d}"
+                else:
+                    _new_cn = 'XX9999'
+                
+                # Build dummy row with all columns empty except interview_status = 20202020
+                _dummy = {col: pd.NA for col in df_processed.columns}
+                _dummy['CN'] = _new_cn
+                _dummy['interview_status'] = 20202020
+                _dummy['index'] = pd.NA
+                _dummy['HH_ID'] = _new_cn + '.000'
+                _dummy['MEM_ID'] = _new_cn + '.000.0'
+                if new_cluster_purpose:
+                    _dummy['c2_name'] = new_cluster_purpose
+                
+                _new_row_df = pd.DataFrame([_dummy])
+                st.session_state['_inject_new_cluster'] = _new_row_df
+                
+                # Track step
+                sno = len(st.session_state.steps_tracker) + 1
+                st.session_state.steps_tracker.append({
+                    'S.No': sno,
+                    'Step': 'Add New Cluster',
+                    'Details': f'Created {_new_cn}' + (f' — {new_cluster_purpose}' if new_cluster_purpose else ''),
+                    'Remark': '',
+                    '_op_type': 'add_cluster',
+                    '_op_data': {'cn': _new_cn, 'purpose': new_cluster_purpose}
+                })
+                st.success(f"✅ New cluster **{_new_cn}** created")
+                st.rerun()
             st.markdown("---")
         st.markdown("📍 EPS Reference (Haversine Metric)")
         
@@ -4308,7 +4458,7 @@ eps_radians = {eps_radians:.6f}
         @st.fragment
         def render_map():
             # Toggle to switch between Status 103 Only and Overall (all statuses)
-            col_map_filter2, col_map_filter3 = st.columns([2.5, 1.5])
+            col_map_filter2, col_map_filter3, col_map_filter4 = st.columns([2.5, 1.5, 2])
             with col_map_filter2:
                 map_filter = st.radio(
                     "Show Individuals:",
@@ -4323,6 +4473,14 @@ eps_radians = {eps_radians:.6f}
                     "Show Circles",
                     value=True,
                     key='map_show_circles'
+                )
+            with col_map_filter4:
+                show_hh_squares = st.radio(
+                    "Show Household Squares:",
+                    options=['Off', 'Consented', 'All'],
+                    index=0,
+                    horizontal=True,
+                    key='map_hh_squares_radio'
                 )
             
             # Force map rebuild by clearing cache when cluster changes
@@ -4449,6 +4607,104 @@ eps_radians = {eps_radians:.6f}
                                 fillOpacity=0.7,
                                 weight=2
                             ).add_to(marker_cluster)
+                    
+                    # ── Add Household Layers (one per HH_ID, off by default) ────
+                    if show_hh_squares != 'Off':
+                        # Determine which households to include
+                        if show_hh_squares == 'Consented':
+                            _hh_pool = cluster_data[cluster_data['HH_Consent'] == 1] if 'HH_Consent' in cluster_data.columns else cluster_data.iloc[0:0]
+                        else:  # All
+                            _hh_pool = cluster_data
+                        
+                        if not _hh_pool.empty:
+                            _hh_pool_valid = _hh_pool[
+                                pd.notna(_hh_pool[lat_col_name]) & pd.notna(_hh_pool[lon_col_name])
+                            ].copy()
+                            _hh_pool_valid[lat_col_name] = pd.to_numeric(_hh_pool_valid[lat_col_name], errors='coerce')
+                            _hh_pool_valid[lon_col_name] = pd.to_numeric(_hh_pool_valid[lon_col_name], errors='coerce')
+                            _hh_pool_valid = _hh_pool_valid.dropna(subset=[lat_col_name, lon_col_name])
+                            
+                            _sq_half = 0.00015  # square half-side in degrees (~15m)
+                            
+                            for _hh_id in sorted(_hh_pool_valid['HH_ID'].unique()):
+                                _hh_members = _hh_pool_valid[_hh_pool_valid['HH_ID'] == _hh_id]
+                                if _hh_members.empty:
+                                    continue
+                                
+                                _sq_color = hh_colors.get(_hh_id, generate_color_from_hh_id(_hh_id))
+                                _hh_consent_val = int(_hh_members.iloc[0].get('HH_Consent', 0)) if 'HH_Consent' in _hh_members.columns else 'N/A'
+                                _n_members = len(_hh_members)
+                                
+                                # Each HH is its own layer, OFF by default
+                                _hh_fg = folium.FeatureGroup(
+                                    name=f"🏠 {_hh_id} ({_n_members} members)",
+                                    show=False
+                                )
+                                
+                                # Centroid of the household
+                                _hh_lat = _hh_members[lat_col_name].mean()
+                                _hh_lon = _hh_members[lon_col_name].mean()
+                                
+                                # Square boundary around centroid
+                                folium.Rectangle(
+                                    bounds=[
+                                        [_hh_lat - _sq_half, _hh_lon - _sq_half],
+                                        [_hh_lat + _sq_half, _hh_lon + _sq_half]
+                                    ],
+                                    color=_sq_color,
+                                    fill=True,
+                                    fillColor=_sq_color,
+                                    fillOpacity=0.25,
+                                    weight=2,
+                                ).add_to(_hh_fg)
+                                
+                                # House icon at centroid
+                                folium.Marker(
+                                    location=[_hh_lat, _hh_lon],
+                                    icon=folium.Icon(icon='home', prefix='fa', color='cadetblue'),
+                                    tooltip=f"HH: {_hh_id} | Members: {_n_members} | Consent: {_hh_consent_val}",
+                                    popup=folium.Popup(
+                                        f"<b>Household:</b> {_hh_id}<br>"
+                                        f"<b>HH_Consent:</b> {_hh_consent_val}<br>"
+                                        f"<b>Members:</b> {_n_members}<br>"
+                                        f"<b>Center:</b> {_hh_lat:.5f}, {_hh_lon:.5f}",
+                                        max_width=250
+                                    )
+                                ).add_to(_hh_fg)
+                                
+                                # Individual member markers inside the household
+                                for _, _mem in _hh_members.iterrows():
+                                    _m_lat = _mem[lat_col_name]
+                                    _m_lon = _mem[lon_col_name]
+                                    _mem_id = _mem.get('MEM_ID', '')
+                                    _mem_status = _mem.get('interview_status', '')
+                                    _mem_name = _mem.get('c2_name', '')
+                                    _mem_age = _mem.get('c2_age', '')
+                                    _mem_gender = _mem.get('c2_gender', '')
+                                    _hh_addr = _mem.get('hh_address', 'N/A') if 'hh_address' in _mem.index else 'N/A'
+                                    
+                                    folium.CircleMarker(
+                                        location=[_m_lat, _m_lon],
+                                        radius=6,
+                                        color=_sq_color,
+                                        fill=True,
+                                        fillColor=_sq_color,
+                                        fillOpacity=0.85,
+                                        weight=2,
+                                        tooltip=f"MEM: {_mem_id} | Status: {_mem_status}",
+                                        popup=folium.Popup(
+                                            f"<b>HH:</b> {_hh_id}<br>"
+                                            f"<b>MEM:</b> {_mem_id}<br>"
+                                            f"<b>Name:</b> {_mem_name}<br>"
+                                            f"<b>Age:</b> {_mem_age}, <b>Gender:</b> {_mem_gender}<br>"
+                                            f"<b>Status:</b> {_mem_status}<br>"
+                                            f"<b>Lat, Lon:</b> {_m_lat:.5f}, {_m_lon:.5f}<br>"
+                                            f"<b>Address:</b> {_hh_addr}",
+                                            max_width=280
+                                        )
+                                    ).add_to(_hh_fg)
+                                
+                                _hh_fg.add_to(m)
                     
                     # ── Add DBSCAN Cluster Center Circles ────────────────────────
                     # Show circles for each DBSCAN sub-cluster with radius = EPS km
