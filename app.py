@@ -4624,8 +4624,6 @@ eps_radians = {eps_radians:.6f}
                             _hh_pool_valid[lon_col_name] = pd.to_numeric(_hh_pool_valid[lon_col_name], errors='coerce')
                             _hh_pool_valid = _hh_pool_valid.dropna(subset=[lat_col_name, lon_col_name])
                             
-                            _sq_half = 0.00015  # square half-side in degrees (~15m)
-                            
                             for _hh_id in sorted(_hh_pool_valid['HH_ID'].unique()):
                                 _hh_members = _hh_pool_valid[_hh_pool_valid['HH_ID'] == _hh_id]
                                 if _hh_members.empty:
@@ -4641,39 +4639,9 @@ eps_radians = {eps_radians:.6f}
                                     show=False
                                 )
                                 
-                                # Centroid of the household
-                                _hh_lat = _hh_members[lat_col_name].mean()
-                                _hh_lon = _hh_members[lon_col_name].mean()
-                                
-                                # Square boundary around centroid
-                                folium.Rectangle(
-                                    bounds=[
-                                        [_hh_lat - _sq_half, _hh_lon - _sq_half],
-                                        [_hh_lat + _sq_half, _hh_lon + _sq_half]
-                                    ],
-                                    color=_sq_color,
-                                    fill=True,
-                                    fillColor=_sq_color,
-                                    fillOpacity=0.25,
-                                    weight=2,
-                                ).add_to(_hh_fg)
-                                
-                                # House icon at centroid
-                                folium.Marker(
-                                    location=[_hh_lat, _hh_lon],
-                                    icon=folium.Icon(icon='home', prefix='fa', color='cadetblue'),
-                                    tooltip=f"HH: {_hh_id} | Members: {_n_members} | Consent: {_hh_consent_val}",
-                                    popup=folium.Popup(
-                                        f"<b>Household:</b> {_hh_id}<br>"
-                                        f"<b>HH_Consent:</b> {_hh_consent_val}<br>"
-                                        f"<b>Members:</b> {_n_members}<br>"
-                                        f"<b>Center:</b> {_hh_lat:.5f}, {_hh_lon:.5f}",
-                                        max_width=250
-                                    )
-                                ).add_to(_hh_fg)
-                                
-                                # Individual member markers inside the household
-                                for _, _mem in _hh_members.iterrows():
+                                # One house-icon marker per member at their exact GPS coordinates
+                                # (avoids centroid distortion when one member has an outlier geocode)
+                                for _mem_idx, _mem in _hh_members.iterrows():
                                     _m_lat = _mem[lat_col_name]
                                     _m_lon = _mem[lon_col_name]
                                     _mem_id = _mem.get('MEM_ID', '')
@@ -4682,18 +4650,36 @@ eps_radians = {eps_radians:.6f}
                                     _mem_age = _mem.get('c2_age', '')
                                     _mem_gender = _mem.get('c2_gender', '')
                                     _hh_addr = _mem.get('hh_address', 'N/A') if 'hh_address' in _mem.index else 'N/A'
-                                    
-                                    folium.CircleMarker(
+
+                                    folium.Marker(
                                         location=[_m_lat, _m_lon],
-                                        radius=6,
-                                        color=_sq_color,
-                                        fill=True,
-                                        fillColor=_sq_color,
-                                        fillOpacity=0.85,
-                                        weight=2,
-                                        tooltip=f"MEM: {_mem_id} | Status: {_mem_status}",
+                                        icon=folium.DivIcon(
+                                            html=(
+                                                f'<div style="position:relative;width:34px;height:46px;">'
+                                                f'<div style="'
+                                                f'background:{_sq_color};'
+                                                f'width:30px;height:30px;'
+                                                f'border-radius:50% 50% 50% 0;'
+                                                f'transform:rotate(-45deg);'
+                                                f'border:2px solid rgba(0,0,0,0.45);'
+                                                f'box-shadow:2px 2px 5px rgba(0,0,0,0.4);'
+                                                f'position:absolute;top:0;left:2px;'
+                                                f'"></div>'
+                                                f'<i class="fa fa-home" style="'
+                                                f'position:absolute;top:6px;left:10px;'
+                                                f'color:white;font-size:14px;'
+                                                f'text-shadow:0 1px 2px rgba(0,0,0,0.6);'
+                                                f'"></i>'
+                                                f'</div>'
+                                            ),
+                                            icon_size=(34, 46),
+                                            icon_anchor=(17, 46)
+                                        ),
+                                        tooltip=f"HH: {_hh_id} | MEM: {_mem_id} | Status: {_mem_status}",
                                         popup=folium.Popup(
                                             f"<b>HH:</b> {_hh_id}<br>"
+                                            f"<b>HH_Consent:</b> {_hh_consent_val}<br>"
+                                            f"<b>Total Members:</b> {_n_members}<br>"
                                             f"<b>MEM:</b> {_mem_id}<br>"
                                             f"<b>Name:</b> {_mem_name}<br>"
                                             f"<b>Age:</b> {_mem_age}, <b>Gender:</b> {_mem_gender}<br>"
